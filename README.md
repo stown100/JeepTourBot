@@ -11,7 +11,7 @@ pip install -r requirements.txt
 
 2. Запустите бота:
 ```bash
-python main.py
+python3 main.py
 ```
 
 ## Настройка уведомлений админу
