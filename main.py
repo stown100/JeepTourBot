@@ -565,16 +565,20 @@ async def commands_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = (
             "<b>Доступные команды (админ):</b>\n"
             "/start — начать бронирование\n"
+            "/clear — очистить данные пользователя и сбросить состояние\n"
             "/bookings — посмотреть все бронирования\n"
-            "/get_my_id — узнать свой chat_id\n"
             "/clear_bookings — удалить все бронирования\n"
             "/delete_booking &lt;id&gt; — удалить бронирование по номеру\n"
+            "/channel_info — информация о канале\n"
+            "/get_channel_info — информация о канале через API\n"
+            "/get_my_id — узнать свой chat_id\n"
             "/commands — список команд"
         )
     else:
         text = (
             "<b>Доступные команды:</b>\n"
             "/start — начать бронирование\n"
+            "/clear — очистить данные пользователя и сбросить состояние\n"
             "/get_my_id — узнать свой chat_id\n"
             "/commands — список команд"
         )
