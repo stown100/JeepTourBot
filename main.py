@@ -3,9 +3,10 @@ import logging
 from datetime import datetime, timedelta
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ConversationHandler, ContextTypes
-from bookings import add_booking, get_all_bookings, update_booking_status, booking_exists
+from bookings import add_booking, get_all_bookings, update_booking_status, booking_exists, delete_all_bookings, delete_booking_by_id
 import os
 from dotenv import load_dotenv # type: ignore
+from telegram.constants import ParseMode
 
 load_dotenv()
 
@@ -28,6 +29,9 @@ LOCATION_TIMES = {
 
 # Состояния для ConversationHandler
 (LOCATION, TIME, PEOPLE, CONFIRM, FINAL) = range(5)
+
+# Словарь для хранения временных запросов на удаление (chat_id: action)
+pending_deletions = {}
 
 def generate_calendar_keyboard(context=None):
     """Генерирует клавиатуру с датами на ближайшие 14 дней, исключая сегодняшнюю дату если все времена уже прошли для выбранной локации."""
@@ -492,6 +496,90 @@ async def get_channel_info_direct(update: Update, context: ContextTypes.DEFAULT_
         print(f"Ошибка: {e}")
         await update.message.reply_text(error_message)
 
+# --- Новые функции для удаления бронирований ---
+async def clear_bookings_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Только для админа
+    if update.message.chat_id not in ADMIN_CHAT_IDS:
+        await update.message.reply_text("❌ У вас нет доступа к этой команде.")
+        return
+    # Показываем подтверждение
+    keyboard = [
+        [InlineKeyboardButton("Да", callback_data="confirm_clear_all")],
+        [InlineKeyboardButton("Нет", callback_data="cancel_clear_all")]
+    ]
+    await update.message.reply_text(
+        "⚠️ Вы точно хотите удалить все бронирования?",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    pending_deletions[update.message.chat_id] = {"type": "all"}
+
+async def delete_booking_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Только для админа
+    if update.message.chat_id not in ADMIN_CHAT_IDS:
+        await update.message.reply_text("❌ У вас нет доступа к этой команде.")
+        return
+    if not context.args or not context.args[0].isdigit():
+        await update.message.reply_text("Пожалуйста, укажите ID бронирования. Пример: /delete_booking 5")
+        return
+    booking_id = int(context.args[0])
+    # Показываем подтверждение
+    keyboard = [
+        [InlineKeyboardButton("Да", callback_data=f"confirm_delete_{booking_id}")],
+        [InlineKeyboardButton("Нет", callback_data=f"cancel_delete_{booking_id}")]
+    ]
+    await update.message.reply_text(
+        f"⚠️ Вы точно хотите удалить бронирование #{booking_id}?",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    pending_deletions[update.message.chat_id] = {"type": "one", "id": booking_id}
+
+async def handle_delete_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    chat_id = query.message.chat_id
+    data = query.data
+    # Удаление всех бронирований
+    if data == "confirm_clear_all":
+        delete_all_bookings()
+        await query.edit_message_text("✅ Все бронирования удалены.")
+        pending_deletions.pop(chat_id, None)
+    elif data == "cancel_clear_all":
+        await query.message.delete()
+        pending_deletions.pop(chat_id, None)
+    # Удаление одного бронирования
+    elif data.startswith("confirm_delete_"):
+        booking_id = int(data.replace("confirm_delete_", ""))
+        if delete_booking_by_id(booking_id):
+            await query.edit_message_text(f"✅ Бронирование #{booking_id} удалено.")
+        else:
+            await query.edit_message_text(f"❌ Бронирование #{booking_id} не найдено.")
+        pending_deletions.pop(chat_id, None)
+    elif data.startswith("cancel_delete_"):
+        await query.message.delete()
+        pending_deletions.pop(chat_id, None)
+
+async def commands_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.chat_id
+    is_admin = user_id in ADMIN_CHAT_IDS
+    if is_admin:
+        text = (
+            "<b>Доступные команды (админ):</b>\n"
+            "/start — начать бронирование\n"
+            "/bookings — посмотреть все бронирования\n"
+            "/get_my_id — узнать свой chat_id\n"
+            "/clear_bookings — удалить все бронирования\n"
+            "/delete_booking &lt;id&gt; — удалить бронирование по номеру\n"
+            "/commands — список команд"
+        )
+    else:
+        text = (
+            "<b>Доступные команды:</b>\n"
+            "/start — начать бронирование\n"
+            "/get_my_id — узнать свой chat_id\n"
+            "/commands — список команд"
+        )
+    await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+
 # Удаляем обработчик сообщений из каналов и связанные функции
 
 def main():
@@ -504,6 +592,10 @@ def main():
     application.add_handler(CommandHandler('channel_info', channel_info))
     application.add_handler(CommandHandler('get_channel_info', get_channel_info_direct))
     application.add_handler(CommandHandler('start', start_command))
+    application.add_handler(CommandHandler('clear_bookings', clear_bookings_command))
+    application.add_handler(CommandHandler('delete_booking', delete_booking_command))
+    application.add_handler(CommandHandler('commands', commands_command))
+    application.add_handler(CallbackQueryHandler(handle_delete_confirm, pattern=r'^(confirm_clear_all|cancel_clear_all|confirm_delete_\d+|cancel_delete_\d+)$'))
 
     # ConversationHandler только для личного бронирования
     conv_handler = ConversationHandler(

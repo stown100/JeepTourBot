@@ -65,3 +65,17 @@ def booking_exists(user_id, location, date, time):
         ):
             return True
     return False 
+
+def delete_all_bookings() -> None:
+    """Удаляет все бронирования (очищает файл)"""
+    save_bookings([])
+
+
+def delete_booking_by_id(booking_id: int) -> bool:
+    """Удаляет бронирование по ID. Возвращает True, если удалено, иначе False."""
+    bookings = load_bookings()
+    new_bookings = [b for b in bookings if b.get('id') != booking_id]
+    if len(new_bookings) == len(bookings):
+        return False  # Ничего не удалено
+    save_bookings(new_bookings)
+    return True 
